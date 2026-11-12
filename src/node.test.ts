@@ -55,17 +55,21 @@ test("a NodeError becomes an error body; 5xx is retryable, 4xx is not", async ()
   assert.equal(((await badRequest.json()) as { error: { retryable: boolean } }).error.retryable, false);
 });
 
-test("GET /health reports the node and its version", async () => {
-  const response = await app.request("/health", {}, {});
+test("GET /health reports the node and its version, and what it needs to read secrets", async () => {
+  const response = await app.request("/health", {}, { DATABASE_URL: "postgres://x", SECRETS_ENCRYPTION_KEY: "k" });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, key: manifest.key, version: manifest.version });
+
+  const missing = await app.request("/health", {}, {});
+  assert.equal(missing.status, 503);
+  assert.match(((await missing.json()) as { detail: string }).detail, /DATABASE_URL, SECRETS_ENCRYPTION_KEY/);
 });
 
 test("GET /.well-known/xaas-node.json describes the node with JSON Schemas", async () => {
   const response = await app.request("/.well-known/xaas-node.json", {}, {});
   const body = (await response.json()) as Record<string, any>;
   assert.equal(body.key, "core.echo");
-  assert.equal(body.version, "1.0.0");
+  assert.equal(body.version, "1.1.0");
   assert.equal(body.retry.max_attempts, 3);
   assert.equal(body.input_schema.type, "object");
   assert.equal(body.input_schema.properties.fail_with.type, "integer");

@@ -9,9 +9,12 @@ export type NodeContext<Env> = {
   attempt: number;
   /** The same on every attempt of one node run. Use it to avoid repeating side effects. */
   idempotencyKey: string;
-  /** Workspace variables the workflow passed along. Never secrets. */
-  vars: Record<string, unknown>;
-  run: { id?: string; workflow?: string; version?: number; env?: string };
+  /** The run: `workspace` and `env` decide which secrets and variables `getSecret` / `getVariable` read. */
+  run: { id?: string; workspace?: string; workflow?: string; version?: number; env?: string };
+  /** A secret of the workspace by name, in the environment of the run (`secrets.ts`). Never return or log it. */
+  getSecret(name: string): Promise<string>;
+  /** A variable of the workspace by name, in the environment of the run. */
+  getVariable(name: string): Promise<string>;
 };
 
 /**

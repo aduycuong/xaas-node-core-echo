@@ -1,6 +1,6 @@
 # Node `core.echo`
 
-Node mẫu: trả lại đúng input nhận được. Folder này vừa là node chạy thật để thử runner, vừa là **khuôn để tạo node mới**: chép cả folder, sửa `src/node.ts`, giữ nguyên phần còn lại.
+Node mẫu: trả lại đúng input nhận được. Từ 1.1.0 nó còn đọc được variable của workspace (`read_variables`) và kiểm tra secret đọc được hay không (`check_secrets`, không bao giờ trả giá trị), để thử env của run. Folder này vừa là node chạy thật để thử runner, vừa là **khuôn để tạo node mới**: chép cả folder, sửa `src/node.ts`, giữ nguyên phần còn lại.
 
 ## Một node là gì
 
@@ -11,6 +11,7 @@ Một node là một Cloudflare Worker riêng, chỉ runner gọi được (qua 
 | `src/node.ts` | Manifest, schema input/output, hàm `execute`, hàm `checkHealth` | **Viết lại** |
 | `src/index.ts` | Ba route của giao thức, validate, định dạng lỗi, log | Giữ nguyên |
 | `src/protocol.ts` | Kiểu `NodeContext`, lớp `NodeError` | Giữ nguyên |
+| `src/secrets.ts` | Đọc secret, variable của workspace theo tên (`getSecret`, `getVariable`) | Giữ nguyên |
 | `src/node.test.ts` | Test gọi Worker giống cách runner gọi | Sửa theo node |
 | `wrangler.jsonc` | Tên Worker, binding, secret | Sửa `name`, thêm binding nếu cần |
 
@@ -34,13 +35,13 @@ Idempotency-Key: <id của node run, giống nhau ở mọi attempt>
 
 {
   "input":   { "text": "hello" },
-  "context": { "vars": {} },
-  "run":     { "id": "…", "workflow": "sample-echo", "version": 1, "env": "production" },
+  "context": {},
+  "run":     { "id": "…", "workspace": "<id của workspace>", "workflow": "sample-echo", "version": 1, "env": "production" },
   "node":    { "key": "core.echo", "version": "1.0.0", "label": "echo input" }
 }
 ```
 
-`input` là giá trị sau khi runner đã thay các template `{{ … }}` của workflow.
+`input` là giá trị sau khi runner đã thay các template `{{ … }}` của workflow. Request không bao giờ mang giá trị secret hay variable: node tự đọc theo tên cho `run.workspace` và `run.env`.
 
 ### Response
 
@@ -57,7 +58,7 @@ Idempotency-Key: <id của node run, giống nhau ở mọi attempt>
 
 1. **`manifest`**: `key` (dạng `category.name`), `version`, `name`, `category`, `description`, `mode`, `timeout_ms`, `retry`. Runner dùng `timeout_ms` và `retry` qua bảng `node_versions`.
 2. **`inputSchema` và `outputSchema`** (Zod): là nguồn duy nhất cho cả việc validate lẫn JSON Schema trong manifest. Thêm `.describe()` cho từng trường; mô tả đó sẽ hiện trên UI.
-3. **`execute(input, ctx)`**: việc của node. `ctx` có `env` (binding và secret), `runId`, `nodeRunId`, `attempt`, `idempotencyKey`, `vars`, `run`.
+3. **`execute(input, ctx)`**: việc của node. `ctx` có `env` (binding và secret của Worker), `runId`, `nodeRunId`, `attempt`, `idempotencyKey`, `run`, và `getSecret(name)`, `getVariable(name)` để đọc secret, variable của workspace trong env của run.
 4. **`checkHealth(env)`**: kiểm tra thứ node phụ thuộc (secret đã đặt chưa, tài nguyên có trả lời không). Giữ cho nhẹ và không bao giờ trả giá trị secret.
 
 ### Báo lỗi
@@ -82,7 +83,9 @@ Runner có thể gọi lại cùng một node run: khi node trả lỗi retry đ
 
 ### Secret
 
-- Secret của riêng node (API key của dịch vụ mà node bọc): `wrangler secret put <TÊN>`, khai báo kiểu trong `Env`, đọc qua `ctx.env`.
+- Secret và variable **của workspace** (người dùng nhập ở trang Secrets & variables): `await ctx.getSecret("OCR_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`. Giá trị lấy theo env của run (`production`, `staging`, …). Thiếu giá trị thì node trả `SECRET_NOT_SET` / `VARIABLE_NOT_SET`, không retry.
+- Để đọc được, Worker cần `DATABASE_URL` và `SECRETS_ENCRYPTION_KEY` (cùng giá trị với app). `npm run nodes:deploy` tự đặt hai secret này; `/health` báo lỗi khi thiếu. Khi chạy `npm run dev` riêng node, đặt chúng trong `.dev.vars`.
+- Secret của riêng node (API key của dịch vụ mà node bọc, không phụ thuộc workspace): `wrangler secret put <TÊN>`, khai báo kiểu trong `Env`, đọc qua `ctx.env`.
 - Không ghi secret vào output, message lỗi hay log.
 
 ### Log
