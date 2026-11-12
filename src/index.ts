@@ -83,6 +83,7 @@ app.post("/", async (c) => {
     run,
     getSecret: config.getSecret,
     getVariable: config.getVariable,
+    getConnection: config.getConnection,
   };
 
   try {

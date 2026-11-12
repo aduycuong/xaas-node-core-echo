@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execute } from "./node";
 import { NodeError, type NodeContext } from "./protocol";
-import { createConfigReader, decryptSecretValue, importSecretKey, type ValueQuery } from "./secrets";
+import { createConfigReader, decryptSecretValue, importSecretKey, type ConnectionQuery, type ValueQuery } from "./secrets";
 
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const RUN = { workspace: "00000000-0000-4000-8000-000000000001", env: "staging" };
@@ -69,4 +69,27 @@ test("echo returns the variables asked for and only whether each secret could be
   assert.deepEqual(output.secrets, { API_KEY: true });
   assert.equal(output.env, "staging");
   assert.ok(!JSON.stringify(output).includes("sk_test_3"));
+});
+
+test("reads a connection of the run's workspace with its decrypted tokens", async () => {
+  const sealed = await encryptLikeTheApp(JSON.stringify({ page_access_token: "EAAB-page" }));
+  const rows: Record<string, NonNullable<Awaited<ReturnType<ConnectionQuery>>>> = {
+    "11111111-1111-4111-8111-111111111111": { provider: "facebook-page", name: "ACME Page", external_id: "123", resources: [{ id: "123", kind: "page", label: "ACME Page" }], credentials: sealed, status: "healthy", access_expires_at: null },
+    "22222222-2222-4222-8222-222222222222": { provider: "google", name: "Google", external_id: "u1", resources: [], credentials: sealed, status: "error", access_expires_at: null },
+    "33333333-3333-4333-8333-333333333333": { provider: "google", name: "Google 2", external_id: "u2", resources: [], credentials: sealed, status: "healthy", access_expires_at: new Date(Date.now() - 1000).toISOString() },
+  };
+  const seen: string[] = [];
+  const connectionQuery: ConnectionQuery = async (workspaceId, id) => {
+    seen.push(workspaceId);
+    return rows[id] ?? null;
+  };
+  const reader = createConfigReader({ env: { SECRETS_ENCRYPTION_KEY: KEY }, run: RUN, connectionQuery });
+  const connection = await reader.getConnection("11111111-1111-4111-8111-111111111111");
+  assert.deepEqual(connection.credentials, { page_access_token: "EAAB-page" });
+  assert.equal(connection.externalId, "123");
+  assert.ok(seen.every((id) => id === RUN.workspace), "always scoped to the run's workspace");
+  await assert.rejects(reader.getConnection("22222222-2222-4222-8222-222222222222"), (error: NodeError) => error.code === "CONNECTION_REVOKED" && !error.retryable);
+  await assert.rejects(reader.getConnection("33333333-3333-4333-8333-333333333333"), (error: NodeError) => error.code === "CONNECTION_EXPIRED" && error.retryable);
+  await assert.rejects(reader.getConnection("44444444-4444-4444-8444-444444444444"), (error: NodeError) => error.code === "CONNECTION_NOT_FOUND");
+  await assert.rejects(reader.getConnection("not-an-id"), (error: NodeError) => error.code === "CONNECTION_NOT_FOUND");
 });
