@@ -1,5 +1,7 @@
 // XaaS node protocol, shared shape for every node. Copy unchanged into a new node.
 
+import type { Connection } from "./secrets";
+
 /** What the runner tells the node about the call, besides the input. */
 export type NodeContext<Env> = {
   env: Env;
@@ -15,6 +17,8 @@ export type NodeContext<Env> = {
   getSecret(name: string): Promise<string>;
   /** A variable of the workspace by name, in the environment of the run. */
   getVariable(name: string): Promise<string>;
+  /** A connection of the workspace by id (the one chosen in the node), with working tokens (`secrets.ts`). Never return or log them. */
+  getConnection(connectionId: string): Promise<Connection>;
 };
 
 /**

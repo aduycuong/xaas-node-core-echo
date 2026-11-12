@@ -20,11 +20,33 @@ type StoredValue = { kind: "secret" | "variable"; value: string };
 /** Reads one stored value; replaced in tests. */
 export type ValueQuery = (workspaceId: string, name: string, environment: string) => Promise<StoredValue | null>;
 
+type StoredConnection = { provider: string; name: string; external_id: string; resources: ConnectionResource[]; credentials: string; status: string; access_expires_at: string | null };
+/** Reads one connection of the workspace; replaced in tests. */
+export type ConnectionQuery = (workspaceId: string, connectionId: string) => Promise<StoredConnection | null>;
+
+export type ConnectionResource = { id: string; kind: string; label: string; sub?: string };
+
+/** A connection of the workspace (a Facebook Page, a Google account, a Slack workspace, a Telegram bot) with its tokens. */
+export type Connection = {
+  provider: string;
+  name: string;
+  /** The account on the service: Page id, Google user id, Slack team id, bot id. */
+  externalId: string;
+  resources: ConnectionResource[];
+  /** The provider's tokens: `page_access_token` (Facebook Page), `access_token` (Google), `bot_token` (Slack, Telegram). Never log or return them. */
+  credentials: Record<string, string>;
+};
+
 export type ConfigReader = {
   /** The secret `name` in the environment of the run. Throws `SECRET_NOT_SET` (not retried) when it has no value there. */
   getSecret(name: string): Promise<string>;
   /** The variable `name` in the environment of the run. Throws `VARIABLE_NOT_SET` (not retried) when it has no value there. */
   getVariable(name: string): Promise<string>;
+  /**
+   * A connection of the workspace by id, with working tokens (the app renews them before they end). Throws
+   * `CONNECTION_NOT_FOUND` / `CONNECTION_REVOKED` (not retried) or `CONNECTION_EXPIRED` (retried: a renewal is on its way).
+   */
+  getConnection(connectionId: string): Promise<Connection>;
 };
 
 function databaseQuery(databaseUrl: string): ValueQuery {
@@ -39,8 +61,18 @@ function databaseQuery(databaseUrl: string): ValueQuery {
   };
 }
 
+function databaseConnectionQuery(databaseUrl: string): ConnectionQuery {
+  const sql = neon(databaseUrl);
+  return async (workspaceId, connectionId) => {
+    const rows = (await sql`
+      select provider, name, external_id, resources, credentials, status, access_expires_at from connections
+      where id = ${connectionId}::uuid and workspace_id = ${workspaceId}::uuid limit 1`) as unknown as StoredConnection[];
+    return rows[0] ?? null;
+  };
+}
+
 /** A reader for one call. Values are cached for the call only. */
-export function createConfigReader(params: { env: ConfigEnv; run: { workspace?: string; env?: string }; query?: ValueQuery }): ConfigReader {
+export function createConfigReader(params: { env: ConfigEnv; run: { workspace?: string; env?: string }; query?: ValueQuery; connectionQuery?: ConnectionQuery }): ConfigReader {
   const { env, run } = params;
   const cache = new Map<string, Promise<StoredValue | null>>();
   let keys: Promise<SecretKey[]> | null = null;
@@ -57,7 +89,34 @@ export function createConfigReader(params: { env: ConfigEnv; run: { workspace?: 
     return found;
   }
 
+  async function decrypt(stored: string): Promise<string> {
+    if (!env.SECRETS_ENCRYPTION_KEY) throw new NodeError("CONFIG_UNAVAILABLE", "This node cannot decrypt secrets: SECRETS_ENCRYPTION_KEY is not set on its Worker.", { status: 500, retryable: false });
+    keys ??= Promise.all([env.SECRETS_ENCRYPTION_KEY, env.SECRETS_ENCRYPTION_KEY_PREVIOUS].filter((key): key is string => Boolean(key)).map(importSecretKey));
+    return decryptSecretValue(stored, await keys);
+  }
+
   return {
+    async getConnection(connectionId) {
+      if (!run.workspace) throw new NodeError("CONFIG_UNAVAILABLE", "The request has no workspace, so connections cannot be read.", { status: 500, retryable: false });
+      if (!/^[0-9a-f-]{36}$/i.test(connectionId)) throw new NodeError("CONNECTION_NOT_FOUND", "Choose a connection for this node.", { status: 422, retryable: false });
+      const query = params.connectionQuery ?? (env.DATABASE_URL ? databaseConnectionQuery(env.DATABASE_URL) : null);
+      if (!query) throw new NodeError("CONFIG_UNAVAILABLE", "This node cannot read connections: DATABASE_URL is not set on its Worker.", { status: 500, retryable: false });
+      const row = await query(run.workspace, connectionId);
+      if (!row) throw new NodeError("CONNECTION_NOT_FOUND", "The connection of this node was disconnected. Choose another one.", { status: 422, retryable: false });
+      if (row.status === "error") throw new NodeError("CONNECTION_REVOKED", `Connection "${row.name}" no longer works. Reconnect it on the Connections page.`, { status: 422, retryable: false });
+      // The app renews tokens ahead of time; one that already ended means a renewal is late, so the runner tries again.
+      if (row.access_expires_at && Date.parse(row.access_expires_at) <= Date.now() + 60_000) {
+        throw new NodeError("CONNECTION_EXPIRED", `The token of connection "${row.name}" ended and is being renewed.`, { status: 503, retryable: true });
+      }
+      let credentials: Record<string, string>;
+      try {
+        credentials = JSON.parse(await decrypt(row.credentials)) as Record<string, string>;
+      } catch (error) {
+        if (error instanceof NodeError) throw error;
+        throw new NodeError("CONNECTION_UNREADABLE", `Connection "${row.name}" cannot be decrypted with this Worker's key.`, { status: 500, retryable: false });
+      }
+      return { provider: row.provider, name: row.name, externalId: row.external_id, resources: row.resources ?? [], credentials };
+    },
     async getVariable(name) {
       const stored = await load(name);
       if (!stored || stored.kind !== "variable") throw new NodeError("VARIABLE_NOT_SET", `Variable ${name} has no value in ${run.env}.`, { status: 422, retryable: false });
@@ -66,11 +125,10 @@ export function createConfigReader(params: { env: ConfigEnv; run: { workspace?: 
     async getSecret(name) {
       const stored = await load(name);
       if (!stored || stored.kind !== "secret") throw new NodeError("SECRET_NOT_SET", `Secret ${name} has no value in ${run.env}.`, { status: 422, retryable: false });
-      if (!env.SECRETS_ENCRYPTION_KEY) throw new NodeError("CONFIG_UNAVAILABLE", "This node cannot decrypt secrets: SECRETS_ENCRYPTION_KEY is not set on its Worker.", { status: 500, retryable: false });
-      keys ??= Promise.all([env.SECRETS_ENCRYPTION_KEY, env.SECRETS_ENCRYPTION_KEY_PREVIOUS].filter((key): key is string => Boolean(key)).map(importSecretKey));
       try {
-        return await decryptSecretValue(stored.value, await keys);
-      } catch {
+        return await decrypt(stored.value);
+      } catch (error) {
+        if (error instanceof NodeError) throw error;
         // Never include the stored value or the cause.
         throw new NodeError("SECRET_UNREADABLE", `Secret ${name} cannot be decrypted with this Worker's key.`, { status: 500, retryable: false });
       }
