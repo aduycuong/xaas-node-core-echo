@@ -3,18 +3,19 @@
 
 import { z } from "zod";
 import { NodeError, type NodeContext } from "./protocol";
+import type { ConfigEnv } from "./secrets";
 
-/** Bindings and secrets of this Worker (wrangler.jsonc, `wrangler secret put`). Echo needs none. */
-export type Env = Record<string, never>;
+/** Bindings and secrets of this Worker (wrangler.jsonc, `wrangler secret put`). Every node has `ConfigEnv` to read workspace secrets and variables. */
+export type Env = ConfigEnv;
 
 /**
  * Identity and execution settings of the node. `key` + `version` must match the Worker name in
- * wrangler.jsonc: `core.echo` 1.0.0 is `node-core-echo-v1-0-0`. A behaviour change that
+ * wrangler.jsonc: `core.echo` 1.1.0 is `node-core-echo-v1-1-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
 export const manifest = {
   key: "core.echo",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "Echo",
   category: "Core",
   description: "Returns its input. A template for new nodes and a way to try the runner.",
@@ -32,11 +33,16 @@ export const inputSchema = z.looseObject({
     .max(599)
     .optional()
     .describe("Answer with this HTTP status instead of echoing, to try the runner's retries."),
+  read_variables: z.array(z.string()).max(20).optional().describe("Names of workspace variables to return, read in the environment of the run."),
+  check_secrets: z.array(z.string()).max(20).optional().describe("Names of workspace secrets to check: the output says each one could be read, never its value."),
 });
 
 export const outputSchema = z.object({
   echo: z.record(z.string(), z.unknown()).describe("The input, as received."),
   attempt: z.int().describe("Which attempt of the node run produced this output (1 = first)."),
+  env: z.string().optional().describe("The environment of the run."),
+  variables: z.record(z.string(), z.string()).optional().describe("The variables asked for in `read_variables`, by name."),
+  secrets: z.record(z.string(), z.literal(true)).optional().describe("The secrets asked for in `check_secrets` that could be read (always true; a missing one fails the node)."),
 });
 
 export type Input = z.infer<typeof inputSchema>;
@@ -55,13 +61,23 @@ export async function execute(input: Input, ctx: NodeContext<Env>): Promise<Outp
   if (input.fail_with !== undefined) {
     throw new NodeError("SIMULATED_FAILURE", `Asked to fail with ${input.fail_with}.`, { status: input.fail_with });
   }
-  return { echo: input, attempt: ctx.attempt };
+  const output: Output = { echo: input, attempt: ctx.attempt, ...(ctx.run.env ? { env: ctx.run.env } : {}) };
+  if (input.read_variables?.length) {
+    output.variables = Object.fromEntries(await Promise.all(input.read_variables.map(async (name) => [name, await ctx.getVariable(name)] as const)));
+  }
+  if (input.check_secrets?.length) {
+    // Reading proves the secret is set and decrypts; the value itself never leaves the node.
+    for (const name of input.check_secrets) await ctx.getSecret(name);
+    output.secrets = Object.fromEntries(input.check_secrets.map((name) => [name, true as const]));
+  }
+  return output;
 }
 
 /**
  * Health of what the node depends on: a required secret is set, a bound resource answers.
- * Keep it cheap and never return secret values. Echo depends on nothing.
+ * Keep it cheap and never return secret values. Echo needs what reading secrets and variables needs.
  */
-export async function checkHealth(_env: Env): Promise<{ ok: boolean; detail?: string }> {
-  return { ok: true };
+export async function checkHealth(env: Env): Promise<{ ok: boolean; detail?: string }> {
+  const missing = (["DATABASE_URL", "SECRETS_ENCRYPTION_KEY"] as const).filter((name) => !env[name]);
+  return missing.length ? { ok: false, detail: `Not set: ${missing.join(", ")} (needed to read secrets and variables).` } : { ok: true };
 }

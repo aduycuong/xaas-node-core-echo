@@ -12,12 +12,13 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { checkHealth, execute, inputSchema, manifest, outputSchema, type Env } from "./node";
 import { NodeError, type NodeContext } from "./protocol";
+import { createConfigReader } from "./secrets";
 
 const envelopeSchema = z.object({
   input: z.unknown().optional(),
-  context: z.object({ vars: z.record(z.string(), z.unknown()).optional() }).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
   run: z
-    .object({ id: z.string(), workflow: z.string(), version: z.int(), env: z.string() })
+    .object({ id: z.string(), workspace: z.string(), workflow: z.string(), version: z.int(), env: z.string() })
     .partial()
     .optional(),
 });
@@ -71,14 +72,17 @@ app.post("/", async (c) => {
     return fail(400, "INVALID_INPUT", `${where}${issue?.message ?? "Invalid input."}`, false);
   }
 
+  const run = envelope.data.run ?? {};
+  const config = createConfigReader({ env: c.env, run });
   const ctx: NodeContext<Env> = {
     env: c.env,
     runId,
     nodeRunId,
     attempt,
     idempotencyKey: c.req.header("Idempotency-Key") ?? nodeRunId,
-    vars: envelope.data.context?.vars ?? {},
-    run: envelope.data.run ?? {},
+    run,
+    getSecret: config.getSecret,
+    getVariable: config.getVariable,
   };
 
   try {
