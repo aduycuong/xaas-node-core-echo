@@ -10,12 +10,12 @@ export type Env = ResourceEnv;
 
 /**
  * Identity and execution settings of the node. `key` + `version` must match the Worker name in
- * wrangler.jsonc: `core.echo` 1.3.0 is `node-core-echo-v1-3-0`. A behaviour change that
+ * wrangler.jsonc: `core.echo` 1.4.0 is `node-core-echo-v1-4-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
 export const manifest = {
   key: "core.echo",
-  version: "1.3.0",
+  version: "1.4.0",
   name: "Echo",
   category: "Core",
   description: "Returns its input. A template for new nodes and a way to try the runner.",
@@ -30,6 +30,7 @@ export const manifest = {
   resources: [
     { name: "ECHO_CONNECTION", kind: "connection", provider: "google", required: false, description: "A Google connection to check (its tokens are never returned)." },
     { name: "ECHO_FILE", kind: "google.file", mime_types: ["sheet"], required: false, description: "A Google Sheet to check (only its name is returned)." },
+    { name: "ECHO_FOLDER", kind: "r2.folder", required: false, description: "A workspace folder to write a file into and read files from." },
     { name: "ECHO_SECRET", kind: "secret", required: false, description: "A secret to check (its value is never returned)." },
     { name: "ECHO_VARIABLE", kind: "variable", required: false, description: "A variable to return." },
   ],
@@ -46,6 +47,9 @@ export const inputSchema = z.looseObject({
   read_variable: z.boolean().optional().describe("If on, return the variable chosen for ECHO_VARIABLE, in the environment of the run."),
   check_secret: z.boolean().optional().describe("If on, read the secret chosen for ECHO_SECRET to test access; the output only says it worked, never the value."),
   check_connection: z.boolean().optional().describe("If on, read the connection chosen for ECHO_CONNECTION; the output says which one, never its tokens."),
+  write_file: z.string().max(300).optional().describe("Write the input, as JSON, to this path inside ECHO_FOLDER (a file of that name gets new content)."),
+  read_file: z.string().max(300).optional().describe("Read this path inside ECHO_FOLDER; the output gives its size and its first 200 characters."),
+  list_files: z.boolean().optional().describe("List the files inside ECHO_FOLDER."),
   check_file: z.boolean().optional().describe("If on, read the sheet chosen for ECHO_FILE; the output gives its name, never the tokens."),
 });
 
@@ -56,6 +60,9 @@ export const outputSchema = z.object({
   variable: z.string().optional().describe("The value of ECHO_VARIABLE (with `read_variable`)."),
   secret: z.literal(true).optional().describe("ECHO_SECRET could be read (with `check_secret`)."),
   connection: z.object({ provider: z.string(), name: z.string(), external_id: z.string() }).optional().describe("ECHO_CONNECTION could be read (with `check_connection`): what it is, never its tokens."),
+  written: z.object({ path: z.string(), workspace_path: z.string(), size: z.int(), replaced: z.boolean() }).optional().describe("The file written (with `write_file`)."),
+  read: z.object({ path: z.string(), size: z.int(), text: z.string() }).optional().describe("The file read (with `read_file`)."),
+  listed: z.array(z.string()).optional().describe("Paths inside ECHO_FOLDER (with `list_files`)."),
   file: z.object({ id: z.string(), kind: z.string(), label: z.string(), connection: z.string() }).optional().describe("ECHO_FILE could be read (with `check_file`): which sheet, in which connection."),
 });
 
@@ -86,6 +93,17 @@ export async function execute(input: Input, ctx: NodeContext<Env>): Promise<Outp
     const { connection } = await ctx.getResource("ECHO_CONNECTION");
     output.connection = { provider: connection.provider, name: connection.name, external_id: connection.externalId };
   }
+  if (input.write_file) {
+    const { write_file: _write, read_file: _read, list_files: _list, ...rest } = input;
+    const file = await ctx.writeFile("ECHO_FOLDER", input.write_file, JSON.stringify({ run: ctx.runId, attempt: ctx.attempt, input: rest }, null, 2), { contentType: "application/json" });
+    output.written = { path: file.path, workspace_path: file.workspace_path, size: file.size, replaced: file.replaced };
+  }
+  if (input.read_file) {
+    const { file, body } = await ctx.readFile("ECHO_FOLDER", input.read_file);
+    const text = await new Response(body).text();
+    output.read = { path: file.path, size: file.size, text: text.slice(0, 200) };
+  }
+  if (input.list_files) output.listed = (await ctx.listFiles("ECHO_FOLDER")).map((file) => file.path);
   if (input.check_file) {
     const { item, connection } = await ctx.getResource("ECHO_FILE");
     if (!item) throw new NodeError("RESOURCE_GONE", "No sheet came with ECHO_FILE.", { status: 422 });

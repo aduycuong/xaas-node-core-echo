@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // One Worker per node version: node-<key with dashes>-v<version with dashes>.
-  "name": "node-core-echo-v1-3-0",
+  "name": "node-core-echo-v1-4-0",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },

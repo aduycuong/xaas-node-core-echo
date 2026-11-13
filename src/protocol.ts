@@ -1,6 +1,6 @@
 // XaaS node protocol, shared shape for every node. Copy unchanged into a new node.
 
-import type { Resource } from "./resources";
+import type { FileBody, Resource, WorkspaceFile } from "./resources";
 
 /** What the runner tells the node about the call, besides the input. */
 export type NodeContext<Env> = {
@@ -19,6 +19,12 @@ export type NodeContext<Env> = {
   getVariable(name: string): Promise<string>;
   /** The connection, or the file / folder / channel / chat / Page of a connection, chosen for `name`, with working tokens. Never return or log them. */
   getResource(name: string): Promise<Resource>;
+  /** Streams a workspace file: the chosen `r2.file`, or `path` inside the chosen `r2.folder`. */
+  readFile(name: string, path?: string): Promise<{ file: WorkspaceFile; body: ReadableStream<Uint8Array> }>;
+  /** Files inside the chosen `r2.folder` (and its subfolders), newest first. */
+  listFiles(name: string, options?: { prefix?: string }): Promise<WorkspaceFile[]>;
+  /** Writes `path` inside the chosen `r2.folder`; the file shows "Created by run" on the Files page. */
+  writeFile(name: string, path: string, body: FileBody, options?: { contentType?: string; size?: number }): Promise<WorkspaceFile & { replaced: boolean }>;
 };
 
 /**
