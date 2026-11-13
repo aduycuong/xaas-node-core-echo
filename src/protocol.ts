@@ -1,6 +1,6 @@
 // XaaS node protocol, shared shape for every node. Copy unchanged into a new node.
 
-import type { Connection } from "./resources";
+import type { Resource } from "./resources";
 
 /** What the runner tells the node about the call, besides the input. */
 export type NodeContext<Env> = {
@@ -13,12 +13,12 @@ export type NodeContext<Env> = {
   idempotencyKey: string;
   /** The run: its environment decides which values `getSecret` / `getVariable` return. */
   run: { id?: string; workspace?: string; workflow?: string; version?: number; env?: string };
-  /** The secret mapped to `name` in the workflow (a name of `requires.secrets`), in the environment of the run. Never return or log it. */
+  /** The secret chosen for `name` in the workflow (a `secret` of the manifest's `resources`), in the environment of the run. Never return or log it. */
   getSecret(name: string): Promise<string>;
-  /** The variable mapped to `name` (a name of `requires.variables`), in the environment of the run. */
+  /** The variable chosen for `name` (a `variable` of `resources`), in the environment of the run. */
   getVariable(name: string): Promise<string>;
-  /** The connection mapped to `name` (a name of `requires.connections`), with working tokens. Never return or log them. */
-  getConnection(name: string): Promise<Connection>;
+  /** The connection, or the file / folder / channel / chat / Page of a connection, chosen for `name`, with working tokens. Never return or log them. */
+  getResource(name: string): Promise<Resource>;
 };
 
 /**

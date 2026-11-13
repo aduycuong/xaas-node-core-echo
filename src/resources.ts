@@ -1,7 +1,8 @@
-// Secrets, variables and connections of the workspace, read through xaas-resource-broker. Protocol plumbing: copy unchanged
-// into a new node. The node gets only what the person mapped to it in the workflow (the `requires` of its manifest), in
-// the environment of the run, during this attempt. Values never travel in the request; the node holds no database
-// access and no key. The Worker needs the service binding RESOURCE_BROKER (wrangler.jsonc).
+// Secrets, variables, connections and their items (files, folders, channels, chats, Pages) of the workspace, read through
+// xaas-resource-broker. Protocol plumbing: copy unchanged into a new node. The node gets only what the person chose for it
+// in the workflow (the `resources` of its manifest), in the environment of the run, during this attempt. Values never
+// travel in the request; the node holds no database access and no key. The Worker needs the service binding
+// RESOURCE_BROKER (wrangler.jsonc).
 // Never put a secret or a token in the output, an error message or a log line.
 
 import { NodeError } from "./protocol";
@@ -9,26 +10,32 @@ import { NodeError } from "./protocol";
 /** What every node Worker needs to read workspace resources. */
 export type ResourceEnv = { RESOURCE_BROKER?: Fetcher };
 
-export type ConnectionResource = { id: string; kind: string; label: string; sub?: string };
-
 /** A connection of the workspace (Facebook Page, Google account, Slack workspace, Telegram bot) with its tokens. */
 export type Connection = {
+  id: string;
   provider: string;
   name: string;
+  /** Who or what is connected, as shown to people (email, Page name, bot name). */
+  account: string | null;
   /** The account on the service: Page id, Google user id, Slack team id, bot id. */
   externalId: string;
-  resources: ConnectionResource[];
   /** The provider's tokens: `page_access_token` (Facebook Page), `access_token` (Google), `bot_token` (Slack, Telegram). */
   credentials: Record<string, string>;
 };
 
+/** The file, folder, channel, chat or Page chosen in a connection. `kind`: sheet, doc, slides, file, folder, channel, chat, page. */
+export type ResourceItem = { id: string; kind: string; label: string; sub?: string };
+
+/** A resource of kind `connection` (no item) or an item of a connection (`google.file`, `slack.channel`…). */
+export type Resource = { kind: string; connection: Connection; item?: ResourceItem };
+
 export type ResourceReader = {
-  /** The secret mapped to `name` (a name of `requires.secrets`), in the environment of the run. */
+  /** The secret chosen for `name` (a `secret` of the manifest's `resources`), in the environment of the run. */
   getSecret(name: string): Promise<string>;
-  /** The variable mapped to `name` (a name of `requires.variables`). */
+  /** The variable chosen for `name` (a `variable` of `resources`). */
   getVariable(name: string): Promise<string>;
-  /** The connection mapped to `name` (a name of `requires.connections`), with working tokens. */
-  getConnection(name: string): Promise<Connection>;
+  /** The connection or item chosen for `name` (any other kind of `resources`), with working tokens. */
+  getResource(name: string): Promise<Resource>;
 };
 
 type BrokerError = { error?: { code?: string; message?: string; retryable?: boolean } };
@@ -37,7 +44,7 @@ type BrokerError = { error?: { code?: string; message?: string; retryable?: bool
 export function createResourceReader(params: { env: ResourceEnv; token: string | null }): ResourceReader {
   const cache = new Map<string, Promise<unknown>>();
 
-  async function ask<T>(kind: "secrets" | "variables" | "connections", name: string): Promise<T> {
+  async function ask<T>(kind: "secrets" | "variables" | "resources", name: string): Promise<T> {
     const broker = params.env.RESOURCE_BROKER;
     if (!broker) throw new NodeError("CONFIG_UNAVAILABLE", "This node cannot read workspace resources: the RESOURCE_BROKER binding is missing.", { status: 500, retryable: false });
     if (!params.token) throw new NodeError("CONFIG_UNAVAILABLE", "The request has no run token, so workspace resources cannot be read.", { status: 500, retryable: false });
@@ -69,6 +76,6 @@ export function createResourceReader(params: { env: ResourceEnv; token: string |
   return {
     getSecret: async (name) => (await ask<{ value: string }>("secrets", name)).value,
     getVariable: async (name) => (await ask<{ value: string }>("variables", name)).value,
-    getConnection: async (name) => (await ask<{ connection: Connection }>("connections", name)).connection,
+    getResource: async (name) => (await ask<{ resource: Resource }>("resources", name)).resource,
   };
 }

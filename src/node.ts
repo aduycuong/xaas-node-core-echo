@@ -10,12 +10,12 @@ export type Env = ResourceEnv;
 
 /**
  * Identity and execution settings of the node. `key` + `version` must match the Worker name in
- * wrangler.jsonc: `core.echo` 1.2.0 is `node-core-echo-v1-2-0`. A behaviour change that
+ * wrangler.jsonc: `core.echo` 1.3.0 is `node-core-echo-v1-3-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
 export const manifest = {
   key: "core.echo",
-  version: "1.2.0",
+  version: "1.3.0",
   name: "Echo",
   category: "Core",
   description: "Returns its input. A template for new nodes and a way to try the runner.",
@@ -24,14 +24,15 @@ export const manifest = {
   timeout_ms: 30_000,
   retry: { max_attempts: 3, backoff: "exponential", base_delay_ms: 2_000 },
   /**
-   * What the node may read from the workspace: the person maps each item by hand in the workflow; the node reads it by
+   * What the node may use from the workspace: the person chooses each one by hand in the workflow; the node reads it by
    * this name. Echo's are all optional, to try the resource broker.
    */
-  requires: {
-    connections: [{ name: "ECHO_CONNECTION", provider: "google", required: false, description: "A connection to check (its tokens are never returned)." }],
-    secrets: [{ name: "ECHO_SECRET", required: false, description: "A secret to check (its value is never returned)." }],
-    variables: [{ name: "ECHO_VARIABLE", required: false, description: "A variable to return." }],
-  },
+  resources: [
+    { name: "ECHO_CONNECTION", kind: "connection", provider: "google", required: false, description: "A Google connection to check (its tokens are never returned)." },
+    { name: "ECHO_FILE", kind: "google.file", mime_types: ["sheet"], required: false, description: "A Google Sheet to check (only its name is returned)." },
+    { name: "ECHO_SECRET", kind: "secret", required: false, description: "A secret to check (its value is never returned)." },
+    { name: "ECHO_VARIABLE", kind: "variable", required: false, description: "A variable to return." },
+  ],
 };
 
 /** Input after the workflow's templates were resolved. Unknown fields are allowed and echoed back. */
@@ -42,9 +43,10 @@ export const inputSchema = z.looseObject({
     .max(599)
     .optional()
     .describe("Answer with this HTTP status instead of echoing, to try the runner's retries."),
-  read_variable: z.boolean().optional().describe("Return the variable mapped to ECHO_VARIABLE, in the environment of the run."),
-  check_secret: z.boolean().optional().describe("Check the secret mapped to ECHO_SECRET can be read; its value is never returned."),
-  check_connection: z.boolean().optional().describe("Check the connection mapped to ECHO_CONNECTION can be read; its tokens are never returned."),
+  read_variable: z.boolean().optional().describe("If on, return the variable chosen for ECHO_VARIABLE, in the environment of the run."),
+  check_secret: z.boolean().optional().describe("If on, read the secret chosen for ECHO_SECRET to test access; the output only says it worked, never the value."),
+  check_connection: z.boolean().optional().describe("If on, read the connection chosen for ECHO_CONNECTION; the output says which one, never its tokens."),
+  check_file: z.boolean().optional().describe("If on, read the sheet chosen for ECHO_FILE; the output gives its name, never the tokens."),
 });
 
 export const outputSchema = z.object({
@@ -53,7 +55,8 @@ export const outputSchema = z.object({
   env: z.string().optional().describe("The environment of the run."),
   variable: z.string().optional().describe("The value of ECHO_VARIABLE (with `read_variable`)."),
   secret: z.literal(true).optional().describe("ECHO_SECRET could be read (with `check_secret`)."),
-  connection: z.object({ provider: z.string(), name: z.string(), external_id: z.string(), resources: z.int() }).optional().describe("ECHO_CONNECTION could be read (with `check_connection`): what it is, never its tokens."),
+  connection: z.object({ provider: z.string(), name: z.string(), external_id: z.string() }).optional().describe("ECHO_CONNECTION could be read (with `check_connection`): what it is, never its tokens."),
+  file: z.object({ id: z.string(), kind: z.string(), label: z.string(), connection: z.string() }).optional().describe("ECHO_FILE could be read (with `check_file`): which sheet, in which connection."),
 });
 
 export type Input = z.infer<typeof inputSchema>;
@@ -80,8 +83,13 @@ export async function execute(input: Input, ctx: NodeContext<Env>): Promise<Outp
     output.secret = true;
   }
   if (input.check_connection) {
-    const connection = await ctx.getConnection("ECHO_CONNECTION");
-    output.connection = { provider: connection.provider, name: connection.name, external_id: connection.externalId, resources: connection.resources.length };
+    const { connection } = await ctx.getResource("ECHO_CONNECTION");
+    output.connection = { provider: connection.provider, name: connection.name, external_id: connection.externalId };
+  }
+  if (input.check_file) {
+    const { item, connection } = await ctx.getResource("ECHO_FILE");
+    if (!item) throw new NodeError("RESOURCE_GONE", "No sheet came with ECHO_FILE.", { status: 422 });
+    output.file = { id: item.id, kind: item.kind, label: item.label, connection: connection.name };
   }
   return output;
 }
