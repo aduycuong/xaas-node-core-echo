@@ -85,6 +85,9 @@ app.post("/", async (c) => {
     getSecret: config.getSecret,
     getVariable: config.getVariable,
     getResource: config.getResource,
+    readFile: config.readFile,
+    listFiles: config.listFiles,
+    writeFile: config.writeFile,
   };
 
   try {

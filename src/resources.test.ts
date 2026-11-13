@@ -59,3 +59,33 @@ test("echo returns the chosen variable, the sheet's name, and only whether the s
   assert.deepEqual(output.file, { id: "f", kind: "sheet", label: "Leads", connection: "Google – Marketing" });
   assert.ok(!JSON.stringify(output).includes("s3cr3t") && !JSON.stringify(output).includes("ya29"));
 });
+
+test("echo writes a file into its folder, reads it back and lists it, through the broker", async () => {
+  const stored = new Map<string, string>();
+  const fetcher = {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const path = url.searchParams.get("path") ?? "";
+      if (url.pathname === "/v1/files/ECHO_FOLDER" && init?.method === "PUT") {
+        const text = await new Response(init.body).text();
+        const replaced = stored.has(path);
+        stored.set(path, text);
+        return Response.json({ file: { path, workspace_path: `out/${path}`, name: path, size: text.length, mime_type: "application/json", replaced } });
+      }
+      if (url.pathname === "/v1/files/ECHO_FOLDER/list") return Response.json({ files: [...stored.keys()].map((key) => ({ path: key })) });
+      if (url.pathname === "/v1/files/ECHO_FOLDER") {
+        const text = stored.get(path);
+        return text === undefined ? Response.json({ error: { code: "FILE_NOT_FOUND", message: "No file.", retryable: false } }, { status: 404 }) : new Response(text, { headers: { "X-XAAS-File": JSON.stringify({ path, size: text.length }) } });
+      }
+      return Response.json({ error: { code: "NOT_MAPPED" } }, { status: 403 });
+    },
+  } as unknown as Fetcher;
+  const env = { RESOURCE_BROKER: fetcher };
+  const ctx: NodeContext<ResourceEnv> = { env, runId: "r", nodeRunId: "n", attempt: 1, idempotencyKey: "n", run: { env: "staging" }, ...createResourceReader({ env, token: TOKEN }) };
+  const output = await execute({ write_file: "a.json", read_file: "a.json", list_files: true, note: "hi" }, ctx);
+  assert.equal(output.written?.replaced, false);
+  assert.equal(output.read?.path, "a.json");
+  assert.ok(output.read?.text.includes('"note": "hi"'));
+  assert.deepEqual(output.listed, ["a.json"]);
+  await assert.rejects(ctx.readFile("ECHO_FOLDER", "missing.json"), (error: NodeError) => error.code === "FILE_NOT_FOUND" && !error.retryable);
+});

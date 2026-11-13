@@ -69,7 +69,7 @@ test("GET /.well-known/xaas-node.json describes the node with JSON Schemas", asy
   const response = await app.request("/.well-known/xaas-node.json", {}, {});
   const body = (await response.json()) as Record<string, any>;
   assert.equal(body.key, "core.echo");
-  assert.equal(body.version, "1.3.0");
+  assert.equal(body.version, "1.4.0");
   assert.equal(body.resources.find((resource: { kind: string }) => resource.kind === "secret").name, "ECHO_SECRET");
   assert.equal(body.retry.max_attempts, 3);
   assert.equal(body.input_schema.type, "object");
