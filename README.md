@@ -83,8 +83,8 @@ Runner có thể gọi lại cùng một node run: khi node trả lỗi retry đ
 
 ### Secret
 
-- Node **khai báo** tài nguyên cần trong `manifest.requires` (`connections`, `secrets`, `variables`, mỗi mục một tên logic, `required`, mô tả). Người dùng **map tường minh** từng mục với connection / secret / variable của workspace trong inspector; mục `required` chưa map thì không publish được.
-- Trong `execute`: `await ctx.getSecret("OPENAI_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`, `await ctx.getConnection("sheet")` theo **tên logic**. Giá trị lấy theo env của run. Chỉ đọc được những gì đã map cho node; tên khác bị từ chối (`NOT_MAPPED`).
+- Node **khai báo** những gì nó dùng trong `manifest.resources`: một danh sách, mỗi mục một tên, `kind` (`secret`, `variable`, `connection` + `provider`, `google.file` + `mime_types`, `google.folder`, `slack.channel`, `telegram.chat`, `facebook.page`), `required`, mô tả. Khai báo đúng item node làm việc (sheet nào, channel nào), không khai báo connection rồi thêm input id. Người dùng **chọn tường minh** từng mục ở tab Resources của inspector; mục `required` chưa chọn thì không publish được.
+- Trong `execute`: `await ctx.getSecret("OPENAI_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`, `await ctx.getResource("sheet")` (→ `{ kind, connection: { provider, account, credentials… }, item: { id, kind, label } }`) theo tên. Secret, variable lấy theo env của run. Chỉ đọc được những gì đã chọn cho node, đúng kind đã khai báo; khác đi bị từ chối (`NOT_MAPPED`).
 - Node đọc qua `xaas-resource-broker` (binding `RESOURCE_BROKER` trong `wrangler.jsonc`) bằng token run trong header `X-XAAS-Resource-Token`. Node không có `DATABASE_URL` hay key giải mã. Token chỉ dùng được trong attempt đó.
 - Lỗi: thiếu giá trị ở env → `SECRET_NOT_SET` / `VARIABLE_NOT_SET`; connection mất quyền → `CONNECTION_REVOKED` (không retry); token dịch vụ vừa hết hạn → `CONNECTION_EXPIRED` (retry).
 - Secret của riêng node (API key của dịch vụ mà node bọc, không phụ thuộc workspace): `wrangler secret put <TÊN>`, khai báo kiểu trong `Env`, đọc qua `ctx.env`.
