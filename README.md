@@ -11,7 +11,7 @@ Một node là một Cloudflare Worker riêng, chỉ runner gọi được (qua 
 | `src/node.ts` | Manifest, schema input/output, hàm `execute`, hàm `checkHealth` | **Viết lại** |
 | `src/index.ts` | Ba route của giao thức, validate, định dạng lỗi, log | Giữ nguyên |
 | `src/protocol.ts` | Kiểu `NodeContext`, lớp `NodeError` | Giữ nguyên |
-| `src/secrets.ts` | Đọc secret, variable của workspace theo tên (`getSecret`, `getVariable`) | Giữ nguyên |
+| `src/resources.ts` | Đọc secret, variable, connection đã map cho node qua `xaas-resource-broker` | Giữ nguyên |
 | `src/node.test.ts` | Test gọi Worker giống cách runner gọi | Sửa theo node |
 | `wrangler.jsonc` | Tên Worker, binding, secret | Sửa `name`, thêm binding nếu cần |
 
@@ -83,9 +83,10 @@ Runner có thể gọi lại cùng một node run: khi node trả lỗi retry đ
 
 ### Secret
 
-- Secret và variable **của workspace** (người dùng nhập ở trang Secrets & variables): `await ctx.getSecret("OCR_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`. Giá trị lấy theo env của run (`production`, `staging`, …). Thiếu giá trị thì node trả `SECRET_NOT_SET` / `VARIABLE_NOT_SET`, không retry.
-- **Connection** (tài khoản / kênh ở dịch vụ ngoài: Facebook Page, Google, Slack, Telegram) mà người dùng chọn cho node: `const page = await ctx.getConnection(input.connection_id)`, rồi dùng `page.credentials.page_access_token` (Facebook), `access_token` (Google), `bot_token` (Slack, Telegram). App tự renew token trước khi hết hạn; node chỉ đọc. Connection mất quyền → `CONNECTION_REVOKED` (không retry); token vừa hết hạn mà chưa kịp renew → `CONNECTION_EXPIRED` (retry).
-- Để đọc được, Worker cần `DATABASE_URL` và `SECRETS_ENCRYPTION_KEY` (cùng giá trị với app). `npm run nodes:deploy` tự đặt hai secret này; `/health` báo lỗi khi thiếu. Khi chạy `npm run dev` riêng node, đặt chúng trong `.dev.vars`.
+- Node **khai báo** tài nguyên cần trong `manifest.requires` (`connections`, `secrets`, `variables`, mỗi mục một tên logic, `required`, mô tả). Người dùng **map tường minh** từng mục với connection / secret / variable của workspace trong inspector; mục `required` chưa map thì không publish được.
+- Trong `execute`: `await ctx.getSecret("OPENAI_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`, `await ctx.getConnection("sheet")` theo **tên logic**. Giá trị lấy theo env của run. Chỉ đọc được những gì đã map cho node; tên khác bị từ chối (`NOT_MAPPED`).
+- Node đọc qua `xaas-resource-broker` (binding `RESOURCE_BROKER` trong `wrangler.jsonc`) bằng token run trong header `X-XAAS-Resource-Token`. Node không có `DATABASE_URL` hay key giải mã. Token chỉ dùng được trong attempt đó.
+- Lỗi: thiếu giá trị ở env → `SECRET_NOT_SET` / `VARIABLE_NOT_SET`; connection mất quyền → `CONNECTION_REVOKED` (không retry); token dịch vụ vừa hết hạn → `CONNECTION_EXPIRED` (retry).
 - Secret của riêng node (API key của dịch vụ mà node bọc, không phụ thuộc workspace): `wrangler secret put <TÊN>`, khai báo kiểu trong `Env`, đọc qua `ctx.env`.
 - Không ghi secret vào output, message lỗi hay log.
 

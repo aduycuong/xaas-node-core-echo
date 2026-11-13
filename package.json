@@ -16,7 +16,6 @@
     "wrangler": "^4.160.0"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0",
     "hono": "^4.13.17",
     "zod": "^4.6.7"
   }

@@ -1,13 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // One Worker per node version: node-<key with dashes>-v<version with dashes>.
-  "name": "node-core-echo-v1-1-0",
+  "name": "node-core-echo-v1-2-0",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
   // Reached only through the runner's service binding.
   "workers_dev": false,
-  "preview_urls": false
-  // Secrets (wrangler secret put, set by `npm run nodes:deploy`): DATABASE_URL and SECRETS_ENCRYPTION_KEY, the same
-  // values as the app's, to read workspace secrets and variables (src/secrets.ts). Optional: SECRETS_ENCRYPTION_KEY_PREVIOUS.
+  "preview_urls": false,
+  // Workspace secrets, variables and connections come from xaas-resource-broker (src/resources.ts): deploy it first.
+  "services": [{ "binding": "RESOURCE_BROKER", "service": "xaas-resource-broker" }]
 }

@@ -12,7 +12,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { checkHealth, execute, inputSchema, manifest, outputSchema, type Env } from "./node";
 import { NodeError, type NodeContext } from "./protocol";
-import { createConfigReader } from "./secrets";
+import { createResourceReader } from "./resources";
 
 const envelopeSchema = z.object({
   input: z.unknown().optional(),
@@ -73,7 +73,8 @@ app.post("/", async (c) => {
   }
 
   const run = envelope.data.run ?? {};
-  const config = createConfigReader({ env: c.env, run });
+  // The run token of this attempt: only the resource reader uses it, nothing logs or returns it.
+  const config = createResourceReader({ env: c.env, token: c.req.header("X-XAAS-Resource-Token") ?? null });
   const ctx: NodeContext<Env> = {
     env: c.env,
     runId,
