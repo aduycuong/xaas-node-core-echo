@@ -1,6 +1,6 @@
 // XaaS node protocol, shared shape for every node. Copy unchanged into a new node.
 
-import type { Connection } from "./secrets";
+import type { Connection } from "./resources";
 
 /** What the runner tells the node about the call, besides the input. */
 export type NodeContext<Env> = {
@@ -11,14 +11,14 @@ export type NodeContext<Env> = {
   attempt: number;
   /** The same on every attempt of one node run. Use it to avoid repeating side effects. */
   idempotencyKey: string;
-  /** The run: `workspace` and `env` decide which secrets and variables `getSecret` / `getVariable` read. */
+  /** The run: its environment decides which values `getSecret` / `getVariable` return. */
   run: { id?: string; workspace?: string; workflow?: string; version?: number; env?: string };
-  /** A secret of the workspace by name, in the environment of the run (`secrets.ts`). Never return or log it. */
+  /** The secret mapped to `name` in the workflow (a name of `requires.secrets`), in the environment of the run. Never return or log it. */
   getSecret(name: string): Promise<string>;
-  /** A variable of the workspace by name, in the environment of the run. */
+  /** The variable mapped to `name` (a name of `requires.variables`), in the environment of the run. */
   getVariable(name: string): Promise<string>;
-  /** A connection of the workspace by id (the one chosen in the node), with working tokens (`secrets.ts`). Never return or log them. */
-  getConnection(connectionId: string): Promise<Connection>;
+  /** The connection mapped to `name` (a name of `requires.connections`), with working tokens. Never return or log them. */
+  getConnection(name: string): Promise<Connection>;
 };
 
 /**

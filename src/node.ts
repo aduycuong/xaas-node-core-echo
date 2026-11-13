@@ -3,19 +3,19 @@
 
 import { z } from "zod";
 import { NodeError, type NodeContext } from "./protocol";
-import type { ConfigEnv } from "./secrets";
+import type { ResourceEnv } from "./resources";
 
-/** Bindings and secrets of this Worker (wrangler.jsonc, `wrangler secret put`). Every node has `ConfigEnv` to read workspace secrets and variables. */
-export type Env = ConfigEnv;
+/** Bindings and secrets of this Worker (wrangler.jsonc). Every node has `ResourceEnv`: the binding to xaas-resource-broker. */
+export type Env = ResourceEnv;
 
 /**
  * Identity and execution settings of the node. `key` + `version` must match the Worker name in
- * wrangler.jsonc: `core.echo` 1.1.0 is `node-core-echo-v1-1-0`. A behaviour change that
+ * wrangler.jsonc: `core.echo` 1.2.0 is `node-core-echo-v1-2-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
 export const manifest = {
   key: "core.echo",
-  version: "1.1.0",
+  version: "1.2.0",
   name: "Echo",
   category: "Core",
   description: "Returns its input. A template for new nodes and a way to try the runner.",
@@ -23,7 +23,16 @@ export const manifest = {
   /** Time the runner allows for one attempt. */
   timeout_ms: 30_000,
   retry: { max_attempts: 3, backoff: "exponential", base_delay_ms: 2_000 },
-} as const;
+  /**
+   * What the node may read from the workspace: the person maps each item by hand in the workflow; the node reads it by
+   * this name. Echo's are all optional, to try the resource broker.
+   */
+  requires: {
+    connections: [{ name: "ECHO_CONNECTION", provider: "google", required: false, description: "A connection to check (its tokens are never returned)." }],
+    secrets: [{ name: "ECHO_SECRET", required: false, description: "A secret to check (its value is never returned)." }],
+    variables: [{ name: "ECHO_VARIABLE", required: false, description: "A variable to return." }],
+  },
+};
 
 /** Input after the workflow's templates were resolved. Unknown fields are allowed and echoed back. */
 export const inputSchema = z.looseObject({
@@ -33,16 +42,18 @@ export const inputSchema = z.looseObject({
     .max(599)
     .optional()
     .describe("Answer with this HTTP status instead of echoing, to try the runner's retries."),
-  read_variables: z.array(z.string()).max(20).optional().describe("Names of workspace variables to return, read in the environment of the run."),
-  check_secrets: z.array(z.string()).max(20).optional().describe("Names of workspace secrets to check: the output says each one could be read, never its value."),
+  read_variable: z.boolean().optional().describe("Return the variable mapped to ECHO_VARIABLE, in the environment of the run."),
+  check_secret: z.boolean().optional().describe("Check the secret mapped to ECHO_SECRET can be read; its value is never returned."),
+  check_connection: z.boolean().optional().describe("Check the connection mapped to ECHO_CONNECTION can be read; its tokens are never returned."),
 });
 
 export const outputSchema = z.object({
   echo: z.record(z.string(), z.unknown()).describe("The input, as received."),
   attempt: z.int().describe("Which attempt of the node run produced this output (1 = first)."),
   env: z.string().optional().describe("The environment of the run."),
-  variables: z.record(z.string(), z.string()).optional().describe("The variables asked for in `read_variables`, by name."),
-  secrets: z.record(z.string(), z.literal(true)).optional().describe("The secrets asked for in `check_secrets` that could be read (always true; a missing one fails the node)."),
+  variable: z.string().optional().describe("The value of ECHO_VARIABLE (with `read_variable`)."),
+  secret: z.literal(true).optional().describe("ECHO_SECRET could be read (with `check_secret`)."),
+  connection: z.object({ provider: z.string(), name: z.string(), external_id: z.string(), resources: z.int() }).optional().describe("ECHO_CONNECTION could be read (with `check_connection`): what it is, never its tokens."),
 });
 
 export type Input = z.infer<typeof inputSchema>;
@@ -62,13 +73,15 @@ export async function execute(input: Input, ctx: NodeContext<Env>): Promise<Outp
     throw new NodeError("SIMULATED_FAILURE", `Asked to fail with ${input.fail_with}.`, { status: input.fail_with });
   }
   const output: Output = { echo: input, attempt: ctx.attempt, ...(ctx.run.env ? { env: ctx.run.env } : {}) };
-  if (input.read_variables?.length) {
-    output.variables = Object.fromEntries(await Promise.all(input.read_variables.map(async (name) => [name, await ctx.getVariable(name)] as const)));
+  if (input.read_variable) output.variable = await ctx.getVariable("ECHO_VARIABLE");
+  // Reading proves the secret and the connection are mapped and usable; their values never leave the node.
+  if (input.check_secret) {
+    await ctx.getSecret("ECHO_SECRET");
+    output.secret = true;
   }
-  if (input.check_secrets?.length) {
-    // Reading proves the secret is set and decrypts; the value itself never leaves the node.
-    for (const name of input.check_secrets) await ctx.getSecret(name);
-    output.secrets = Object.fromEntries(input.check_secrets.map((name) => [name, true as const]));
+  if (input.check_connection) {
+    const connection = await ctx.getConnection("ECHO_CONNECTION");
+    output.connection = { provider: connection.provider, name: connection.name, external_id: connection.externalId, resources: connection.resources.length };
   }
   return output;
 }
@@ -78,6 +91,5 @@ export async function execute(input: Input, ctx: NodeContext<Env>): Promise<Outp
  * Keep it cheap and never return secret values. Echo needs what reading secrets and variables needs.
  */
 export async function checkHealth(env: Env): Promise<{ ok: boolean; detail?: string }> {
-  const missing = (["DATABASE_URL", "SECRETS_ENCRYPTION_KEY"] as const).filter((name) => !env[name]);
-  return missing.length ? { ok: false, detail: `Not set: ${missing.join(", ")} (needed to read secrets and variables).` } : { ok: true };
+  return env.RESOURCE_BROKER ? { ok: true } : { ok: false, detail: "The RESOURCE_BROKER binding is missing (needed to read workspace resources)." };
 }
