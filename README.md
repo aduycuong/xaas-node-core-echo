@@ -1,6 +1,6 @@
 # Node `core.echo`
 
-Node mẫu: trả lại đúng input nhận được. Từ 1.1.0 nó còn đọc được variable của workspace (`read_variables`) và kiểm tra secret đọc được hay không (`check_secrets`, không bao giờ trả giá trị), để thử env của run. Folder này vừa là node chạy thật để thử runner, vừa là **khuôn để tạo node mới**: chép cả folder, sửa `src/node.ts`, giữ nguyên phần còn lại.
+Node mẫu: trả lại đúng input nhận được. Từ 1.1.0 nó còn đọc được variable của workspace (`read_variables`) và kiểm tra secret đọc được hay không (`check_secrets`, không bao giờ trả giá trị), để thử env của run. Folder này vừa là node chạy thật để thử runner, vừa là **khuôn để tạo node mới**: chép cả folder, sửa `src/node.ts`, giữ nguyên phần còn lại. Đây là khuôn của node **Sync** (xong dưới 30 giây). Node chạy lâu hơn: chép `node-core-delay` (Async, callback) hoặc `node-core-poll-delay` (Async, polling); README của `node-core-delay` có bảng chọn.
 
 ## Một node là gì
 
@@ -9,8 +9,8 @@ Một node là một Cloudflare Worker riêng, chỉ runner gọi được (qua 
 | File | Nội dung | Khi tạo node mới |
 | --- | --- | --- |
 | `src/node.ts` | Manifest, schema input/output, hàm `execute`, hàm `checkHealth` | **Viết lại** |
-| `src/index.ts` | Ba route của giao thức, validate, định dạng lỗi, log | Giữ nguyên |
-| `src/protocol.ts` | Kiểu `NodeContext`, lớp `NodeError` | Giữ nguyên |
+| `src/index.ts` | Route của giao thức (cả route của node Async), validate, định dạng lỗi, log | Giữ nguyên |
+| `src/protocol.ts` | Kiểu `NodeManifest`, `NodeContext`, kiểu của node Async (`accept`, `JobStatus`, `CallbackBody`), lớp `NodeError` | Giữ nguyên |
 | `src/resources.ts` | Đọc secret, variable, connection đã map cho node qua `xaas-resource-broker` | Giữ nguyên |
 | `src/node.test.ts` | Test gọi Worker giống cách runner gọi | Sửa theo node |
 | `wrangler.jsonc` | Tên Worker, binding, secret | Sửa `name`, thêm binding nếu cần |
