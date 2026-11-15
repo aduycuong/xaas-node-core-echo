@@ -2,7 +2,7 @@
 // `index.ts` (the protocol plumbing) stays the same.
 
 import { z } from "zod";
-import { NodeError, type NodeContext } from "./protocol";
+import { NodeError, type NodeContext, type NodeManifest } from "./protocol";
 import type { ResourceEnv } from "./resources";
 
 /** Bindings and secrets of this Worker (wrangler.jsonc). Every node has `ResourceEnv`: the binding to xaas-resource-broker. */
@@ -13,7 +13,7 @@ export type Env = ResourceEnv;
  * wrangler.jsonc: `core.echo` 1.4.0 is `node-core-echo-v1-4-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
-export const manifest = {
+export const manifest: NodeManifest = {
   key: "core.echo",
   version: "1.4.0",
   name: "Echo",
