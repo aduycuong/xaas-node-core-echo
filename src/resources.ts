@@ -1,4 +1,4 @@
-// Secrets, variables, connections and their items (files, folders, channels, chats, Pages) of the workspace, read through
+// Secrets, variables, connections and their items (files, folders, chats, Pages) of the workspace, read through
 // xaas-resource-broker. Protocol plumbing: copy unchanged into a new node. The node gets only what the person chose for it
 // in the workflow (the `resources` of its manifest), in the environment of the run, during this attempt. Values never
 // travel in the request; the node holds no database access and no key. The Worker needs the service binding
@@ -10,23 +10,23 @@ import { NodeError } from "./protocol";
 /** What every node Worker needs to read workspace resources. */
 export type ResourceEnv = { RESOURCE_BROKER?: Fetcher };
 
-/** A connection of the workspace (Facebook Page, Google account, Slack workspace, Telegram bot) with its tokens. */
+/** A connection of the workspace (Facebook Page, Google account, Telegram bot) with its tokens. */
 export type Connection = {
   id: string;
   provider: string;
   name: string;
   /** Who or what is connected, as shown to people (email, Page name, bot name). */
   account: string | null;
-  /** The account on the service: Page id, Google user id, Slack team id, bot id. */
+  /** The account on the service: Page id, Google user id, bot id. */
   externalId: string;
-  /** The provider's tokens: `page_access_token` (Facebook Page), `access_token` (Google), `bot_token` (Slack, Telegram). */
+  /** The provider's tokens: `page_access_token` (Facebook Page), `access_token` (Google), `bot_token` (Telegram). */
   credentials: Record<string, string>;
 };
 
-/** The file, folder, channel, chat or Page chosen in a connection. `kind`: sheet, doc, slides, file, folder, channel, chat, page. */
+/** The file, folder, chat or Page chosen in a connection. `kind`: sheet, doc, slides, file, folder, chat, page. */
 export type ResourceItem = { id: string; kind: string; label: string; sub?: string };
 
-/** A resource of kind `connection` (no item) or an item of a connection (`google.file`, `slack.channel`…). */
+/** A resource of kind `connection` (no item) or an item of a connection (`google.file`, `telegram.chat`…). */
 export type Resource = { kind: string; connection: Connection; item?: ResourceItem };
 
 /** A workspace file as the broker describes it: `path` is inside the chosen folder (the name, for a chosen file). */
