@@ -35,11 +35,16 @@ export type WorkspaceFile = { path: string; workspace_path: string; name: string
 /** What `writeFile` accepts: a stream (pass `size` when known, else it is written in parts), bytes or text. */
 export type FileBody = ReadableStream<Uint8Array> | Uint8Array | ArrayBuffer | string;
 
+/** A variable as the broker gives it: its text, its type, and the value read as that type. */
+export type TypedVariable = { value: string; type: "string" | "number" | "boolean" | "json"; parsed: unknown };
+
 export type ResourceReader = {
   /** The secret chosen for `name` (a `secret` of the manifest's `resources`), in the environment of the run. */
   getSecret(name: string): Promise<string>;
-  /** The variable chosen for `name` (a `variable` of `resources`). */
+  /** The variable chosen for `name` (a `variable` of `resources`), as text (`30`, `true`, JSON text). */
   getVariable(name: string): Promise<string>;
+  /** The same variable read as the type set on the Secrets & variables page: a number, a boolean, parsed JSON, or text. */
+  getTypedVariable(name: string): Promise<TypedVariable>;
   /** The connection or item chosen for `name` (any other kind of `resources`), with working tokens. */
   getResource(name: string): Promise<Resource>;
   /** Streams a workspace file: the one chosen for an `r2.file` resource, or `path` inside the folder chosen for an `r2.folder` one. */
@@ -135,6 +140,11 @@ export function createResourceReader(params: { env: ResourceEnv; token: string |
     },
     getSecret: async (name) => (await ask<{ value: string }>("secrets", name)).value,
     getVariable: async (name) => (await ask<{ value: string }>("variables", name)).value,
+    // Brokers from before variable types answer `{ value }` only: that is text.
+    getTypedVariable: async (name) => {
+      const answer = await ask<Partial<TypedVariable> & { value: string }>("variables", name);
+      return answer.type ? { value: answer.value, type: answer.type, parsed: answer.parsed } : { value: answer.value, type: "string", parsed: answer.value };
+    },
     getResource: async (name) => (await ask<{ resource: Resource }>("resources", name)).resource,
   };
 }

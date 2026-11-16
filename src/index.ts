@@ -69,6 +69,7 @@ function contextOf(c: AppContext, run: NodeContext<Env>["run"], callbackUrl?: st
     run,
     getSecret: config.getSecret,
     getVariable: config.getVariable,
+    getTypedVariable: config.getTypedVariable,
     getResource: config.getResource,
     readFile: config.readFile,
     listFiles: config.listFiles,

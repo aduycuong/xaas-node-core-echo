@@ -62,8 +62,10 @@ export type NodeContext<Env> = {
   run: { id?: string; workspace?: string; workflow?: string; version?: number; env?: string };
   /** The secret chosen for `name` in the workflow (a `secret` of the manifest's `resources`), in the environment of the run. Never return or log it. */
   getSecret(name: string): Promise<string>;
-  /** The variable chosen for `name` (a `variable` of `resources`), in the environment of the run. */
+  /** The variable chosen for `name` (a `variable` of `resources`), in the environment of the run (else its default), as text. */
   getVariable(name: string): Promise<string>;
+  /** The same variable with its type: `parsed` is a number, a boolean, parsed JSON or the text, as set on the Secrets & variables page. */
+  getTypedVariable(name: string): Promise<{ value: string; type: "string" | "number" | "boolean" | "json"; parsed: unknown }>;
   /** The connection, or the file / folder / channel / chat / Page of a connection, chosen for `name`, with working tokens. Never return or log them. */
   getResource(name: string): Promise<Resource>;
   /** Streams a workspace file: the chosen `r2.file`, or `path` inside the chosen `r2.folder`. */

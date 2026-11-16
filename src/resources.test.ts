@@ -30,6 +30,17 @@ test("asks the broker with the run token and caches each answer for the call", a
   assert.deepEqual(calls, [`/v1/secrets/ECHO_SECRET Bearer ${TOKEN}`, `/v1/variables/ECHO_VARIABLE Bearer ${TOKEN}`]);
 });
 
+test("a typed variable comes back read as its type; an older broker's answer is text", async () => {
+  const { env } = broker({
+    "/v1/variables/TIMEOUT": { status: 200, body: { value: "30", type: "number", parsed: 30 } },
+    "/v1/variables/ECHO_VARIABLE": { status: 200, body: { value: "small" } },
+  });
+  const reader = createResourceReader({ env, token: TOKEN });
+  assert.deepEqual(await reader.getTypedVariable("TIMEOUT"), { value: "30", type: "number", parsed: 30 });
+  assert.equal(await reader.getVariable("TIMEOUT"), "30");
+  assert.deepEqual(await reader.getTypedVariable("ECHO_VARIABLE"), { value: "small", type: "string", parsed: "small" });
+});
+
 test("refusals of the broker become node errors; only a retryable one is retried", async () => {
   const { env } = broker({
     "/v1/secrets/MISSING": { status: 422, body: { error: { code: "SECRET_NOT_SET", message: "No value in staging.", retryable: false } } },
