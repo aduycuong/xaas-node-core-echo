@@ -18,6 +18,7 @@ export const manifest: NodeManifest = {
   version: "1.4.0",
   name: "Echo",
   category: "Core",
+  tags: ["debug", "test"],
   description: "Returns its input. A template for new nodes and a way to try the runner.",
   mode: "sync",
   /** Time the runner allows for one attempt. */

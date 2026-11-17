@@ -7,7 +7,10 @@ type ManifestBase = {
   key: string;
   version: string;
   name: string;
-  category?: string;
+  /** One of the fixed list (xaas-workflows/lib/nodes/constants.ts, NODE_CATEGORIES): the palette groups by it. */
+  category?: "Core" | "Scraper" | "Transform" | "AI" | "Integration" | "Data" | "Notify" | "Logic";
+  /** Up to 8 search words the name, key and category do not hold (lower case, a-z 0-9 -). Not the service or the mode: the app derives those. */
+  tags?: string[];
   description?: string;
   /** Sync: time to answer with the output. Async: time of each HTTP call (the 202, `POST /callback`, the status route). 1 500 – 30 000. */
   timeout_ms: number;
