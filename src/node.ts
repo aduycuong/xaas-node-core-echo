@@ -10,12 +10,12 @@ export type Env = ResourceEnv;
 
 /**
  * Identity and execution settings of the node. `key` + `version` must match the Worker name in
- * wrangler.jsonc: `core.echo` 1.4.0 is `node-core-echo-v1-4-0`. A behaviour change that
+ * wrangler.jsonc: `core.echo` 1.5.0 is `node-core-echo-v1-5-0`. A behaviour change that
  * workflows could notice needs a new version, deployed as a new Worker.
  */
 export const manifest: NodeManifest = {
   key: "core.echo",
-  version: "1.4.0",
+  version: "1.5.0",
   name: "Echo",
   category: "Core",
   tags: ["debug", "test"],
@@ -29,7 +29,7 @@ export const manifest: NodeManifest = {
    * this name. Echo's are all optional, to try the resource broker.
    */
   resources: [
-    { name: "ECHO_CONNECTION", kind: "connection", provider: "google", required: false, description: "A Google connection to check (its tokens are never returned)." },
+    { name: "ECHO_CONNECTION", kind: "connection", providers: ["google"], required: false, description: "A Google connection to check (its tokens are never returned)." },
     { name: "ECHO_FILE", kind: "google.file", mime_types: ["sheet"], required: false, description: "A Google Sheet to check (only its name is returned)." },
     { name: "ECHO_FOLDER", kind: "r2.folder", required: false, description: "A workspace folder to write a file into and read files from." },
     { name: "ECHO_SECRET", kind: "secret", required: false, description: "A secret to check (its value is never returned)." },

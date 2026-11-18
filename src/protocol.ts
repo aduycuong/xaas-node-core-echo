@@ -15,7 +15,7 @@ type ManifestBase = {
   /** Sync: time to answer with the output. Async: time of each HTTP call (the 202, `POST /callback`, the status route). 1 500 – 30 000. */
   timeout_ms: number;
   retry: { max_attempts: number; backoff: "none" | "linear" | "exponential"; base_delay_ms: number };
-  resources?: Array<{ name: string; kind: string; required?: boolean; description?: string; provider?: string; mime_types?: Array<"sheet" | "doc" | "slides"> }>;
+  resources?: Array<{ name: string; kind: string; required?: boolean; description?: string; providers?: string[]; mime_types?: Array<"sheet" | "doc" | "slides"> }>;
 };
 
 /**
