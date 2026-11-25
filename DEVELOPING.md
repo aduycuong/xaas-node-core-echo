@@ -29,6 +29,8 @@ Một node là một Cloudflare Worker riêng, chỉ runner gọi được (qua 
 | `GET /health` | Script deploy, qua runner (`GET /nodes/<tên Worker>/health`) | `200 { "ok": true, "key", "version" }`, hoặc `503` khi `ok` là `false` |
 | `GET /.well-known/xaas-node.json` | Script deploy, để đăng ký node vào database | Manifest kèm JSON Schema của input và output |
 
+Node có `cache: true` trong manifest có thêm `POST /cache-key` (mục **Cache** bên dưới).
+
 ### Request của `POST /`
 
 ```http
@@ -87,10 +89,23 @@ Runner có thể gọi lại cùng một node run: khi node trả lỗi retry đ
 - Node **không có side-effect** (như echo, hay một phép biến đổi dữ liệu): không cần làm gì.
 - Node **có side-effect** (gửi email, trừ tiền, ghi dữ liệu): phải chặn việc làm hai lần. Chuyển `ctx.idempotencyKey` cho API ngoài nếu API đó hỗ trợ, hoặc lưu `key → kết quả` vào KV / D1 và trả lại kết quả cũ khi gặp key đã có.
 
+### Cache
+
+Workflow có thể cache output của node (ô **Cache** ở tab Settings, `data.settings.cacheTtl` tính bằng giây, 0 là không cache), nhưng chỉ khi node cho phép: `cache: true` trong manifest và `export async function cacheKey(input, ctx)` trong `node.ts`. Thiếu `cacheKey` thì `/health` báo lỗi, nên `nodes:deploy` dừng lại.
+
+- Ở attempt 1, trước khi chạy, runner gọi `POST /cache-key` (cùng envelope, cùng header và token như `POST /`). `cacheKey` trả một chuỗi, runner lưu sha256 của nó. Một run cùng workspace, cùng version node, cùng env, cùng key, còn trong TTL thì dùng lại output đã lưu và **không chạy node** (node run hiện "from cache"). Trả `null` là không cache input này. `cacheKey` lỗi thì runner ghi log rồi chạy node như thường.
+- Node tự quyết cái gì làm nên key: dùng `cacheKey(...parts)` của `protocol.ts` (JSON ổn định, không phụ thuộc thứ tự key). Đưa vào những gì đổi output, bỏ những gì không đổi output.
+  - File của workspace: `(await ctx.statFile(FOLDER, path)).etag` (etag của nội dung trong R2, đổi khi nội dung đổi; không tính là một lần đọc file).
+  - URL bên ngoài: chính chuỗi URL, không gọi mạng. Muốn kết quả mới thì người dùng đổi URL (`?1`, `?2`…).
+  - Secret không bao giờ vào key. Variable đổi output (model, prompt mặc định…) thì đưa giá trị của nó vào key.
+- `cacheKey` không được ghi gì hay gọi dịch vụ: chỉ đọc input và metadata.
+- Output cũ là chấp nhận được: file output đã bị xóa, hay URL ngoài đổi nội dung mà giữ nguyên chuỗi, đều không được kiểm. Ghi rõ trong `README.md` của node key được tạo từ đâu.
+- **Không** bật `cache` cho node có side-effect phải xảy ra mỗi run (gửi, đăng, ghi dữ liệu, hỏi người).
+
 ### Secret
 
 - Node **khai báo** những gì nó dùng trong `manifest.resources`: một danh sách, mỗi mục một tên, `kind` (`secret`, `variable`, `connection` + `providers` (một hay nhiều dịch vụ: `["google"]`, `["ses", "resend"]`), `google.file` + `mime_types`, `google.folder`, `telegram.chat`, `facebook.page`), `required`, mô tả. Khai báo đúng item node làm việc (sheet nào, channel nào), không khai báo connection rồi thêm input id. Người dùng **chọn tường minh** từng mục ở tab Resources của inspector; mục `required` chưa chọn thì không publish được.
-- Trong `execute`: `await ctx.getSecret("OPENAI_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`, `await ctx.getResource("sheet")` (→ `{ kind, connection: { provider, account, credentials… }, item: { id, kind, label } }`) theo tên. File của workspace: `ctx.readFile(name, path?)`, `ctx.listFiles(name)`, `ctx.writeFile(name, path, body, { contentType, size? })` với resource `r2.file` / `r2.folder` (stream qua broker; tên file có thể đến từ input nhưng không ra ngoài folder đã chọn). Secret, variable lấy theo env của run: giá trị riêng của env đó, không có thì giá trị default của secret / variable. Chỉ đọc được những gì đã chọn cho node, đúng kind đã khai báo; khác đi bị từ chối (`NOT_MAPPED`).
+- Trong `execute`: `await ctx.getSecret("OPENAI_API_KEY")`, `await ctx.getVariable("LLM_MODEL")`, `await ctx.getResource("sheet")` (→ `{ kind, connection: { provider, account, credentials… }, item: { id, kind, label } }`) theo tên. File của workspace: `ctx.readFile(name, path?)`, `ctx.listFiles(name)`, `ctx.statFile(name, path?)` (thêm `etag`, không đọc nội dung), `ctx.writeFile(name, path, body, { contentType, size? })` với resource `r2.file` / `r2.folder` (stream qua broker; tên file có thể đến từ input nhưng không ra ngoài folder đã chọn). Secret, variable lấy theo env của run: giá trị riêng của env đó, không có thì giá trị default của secret / variable. Chỉ đọc được những gì đã chọn cho node, đúng kind đã khai báo; khác đi bị từ chối (`NOT_MAPPED`).
 - Variable có **type** đặt ở trang Secrets & variables: Text, Number, Boolean hoặc JSON. `getVariable(name)` luôn trả text (`"30"`, `"true"`, chuỗi JSON). `getTypedVariable(name)` trả `{ value, type, parsed }`, trong đó `parsed` là giá trị đã đọc theo type: số, boolean, JSON đã parse, hoặc text. Ví dụ `const { parsed } = await ctx.getTypedVariable("MAX_PAGES")` cho `200` (number). Kiểm `type` trước khi dùng nếu node cần đúng một kiểu, vì người dùng có thể chọn variable khác type. Giá trị lưu không đọc được theo type → `VARIABLE_UNREADABLE`.
 - Node đọc qua `xaas-resource-broker` (binding `RESOURCE_BROKER` trong `wrangler.jsonc`) bằng token run trong header `X-XAAS-Resource-Token`. Node không có `DATABASE_URL` hay key giải mã. Token chỉ dùng được trong attempt đó.
 - Lỗi: env không có giá trị và cũng không có default → `SECRET_NOT_SET` / `VARIABLE_NOT_SET`; connection mất quyền → `CONNECTION_REVOKED` (không retry); token dịch vụ vừa hết hạn → `CONNECTION_EXPIRED` (retry).

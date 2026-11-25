@@ -3,6 +3,7 @@
 //   POST /                           run the node            (called by the runner)
 //   GET  /status/:job                state of a job          (polling nodes: `status` in node.ts)
 //   POST /callback                   read a callback body    (callback nodes with `callback_handler`: `readCallback` in node.ts)
+//   POST /cache-key                  key of an input         (nodes with manifest `cache`: `cacheKey` in node.ts)
 //   GET  /health                     is the node able to work
 //   GET  /.well-known/xaas-node.json manifest: identity, settings, input and output schemas
 //
@@ -26,7 +27,17 @@ type AsyncHooks = {
   /** Callback nodes with `callback_handler`: turns what the service posted into the output, or throws `NodeError`. */
   readCallback(callback: { job_id: string | null; payload: unknown; headers: Record<string, string>; input: unknown }, ctx: NodeContext<Env>): Promise<unknown>;
 };
-const hooks = node as unknown as Partial<AsyncHooks>;
+
+/** Optional part of `node.ts` for nodes with manifest `cache`. */
+type CacheHooks = {
+  /**
+   * The cache key of this input (build it with `cacheKey` of protocol.ts), or null to run the node without the cache.
+   * Asked before attempt 1 with the attempt's context: it may read resources (`statFile` for a file's etag) but must
+   * not write anything or call the service.
+   */
+  cacheKey(input: unknown, ctx: NodeContext<Env>): Promise<string | null>;
+};
+const hooks = node as unknown as Partial<AsyncHooks & CacheHooks>;
 
 const envelopeSchema = z.object({
   input: z.unknown().optional(),
@@ -73,6 +84,7 @@ function contextOf(c: AppContext, run: NodeContext<Env>["run"], callbackUrl?: st
     getResource: config.getResource,
     readFile: config.readFile,
     listFiles: config.listFiles,
+    statFile: config.statFile,
     writeFile: config.writeFile,
   };
 }
@@ -101,6 +113,7 @@ app.get("/health", async (c) => {
   } catch (error) {
     health = { ok: false, detail: error instanceof Error ? error.message : "Health check threw." };
   }
+  if ((manifest as { cache?: boolean }).cache && !hooks.cacheKey) health = { ok: false, detail: 'The manifest has "cache" but node.ts exports no cacheKey.' };
   return c.json({ ...health, key: manifest.key, version: manifest.version }, health.ok ? 200 : 503);
 });
 
@@ -166,6 +179,23 @@ app.post("/callback", async (c) => {
     );
     log("succeeded");
     return c.json({ output });
+  } catch (error) {
+    return failure(c, log, error);
+  }
+});
+
+app.post("/cache-key", async (c) => {
+  if (!hooks.cacheKey || !(manifest as { cache?: boolean }).cache) return c.json(errorBody("NOT_FOUND", "This node has no cache.", false), 404);
+  const log = logger(c, "cache-key");
+  const envelope = envelopeSchema.safeParse(await c.req.json().catch(() => undefined));
+  if (!envelope.success) return c.json(errorBody("INVALID_REQUEST", "The request body is not a XaaS node request.", false), 400);
+  const input = inputSchema.safeParse(envelope.data.input ?? {});
+  // The run itself reports a bad input: no key, so the runner goes on and calls the node.
+  if (!input.success) return c.json({ key: null });
+  try {
+    const key = await hooks.cacheKey(input.data, contextOf(c, envelope.data.run ?? {}));
+    log(key === null ? "no-key" : "key");
+    return c.json({ key });
   } catch (error) {
     return failure(c, log, error);
   }

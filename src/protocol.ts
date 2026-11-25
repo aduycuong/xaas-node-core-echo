@@ -1,6 +1,6 @@
 // XaaS node protocol, shared shape for every node. Copy unchanged into a new node.
 
-import type { FileBody, Resource, WorkspaceFile } from "./resources";
+import type { FileBody, Resource, WorkspaceFile, WorkspaceFileStat } from "./resources";
 
 /** Execution settings of a node, the same for every kind; ranges: xaas-workflows/lib/nodes/constants.ts. */
 type ManifestBase = {
@@ -16,6 +16,12 @@ type ManifestBase = {
   timeout_ms: number;
   retry: { max_attempts: number; backoff: "none" | "linear" | "exponential"; base_delay_ms: number };
   resources?: Array<{ name: string; kind: string; required?: boolean; description?: string; providers?: string[]; mime_types?: Array<"sheet" | "doc" | "slides"> }>;
+  /**
+   * The node exports `cacheKey` (node.ts) and answers `POST /cache-key`: a workflow may then cache its output
+   * (`cacheTtl` of the node's settings). Only for nodes whose output depends on their input alone, never for nodes
+   * that send, post or write something that must happen on every run.
+   */
+  cache?: boolean;
 };
 
 /**
@@ -75,9 +81,32 @@ export type NodeContext<Env> = {
   readFile(name: string, path?: string): Promise<{ file: WorkspaceFile; body: ReadableStream<Uint8Array> }>;
   /** Files inside the chosen `r2.folder` (and its subfolders), newest first. */
   listFiles(name: string, options?: { prefix?: string }): Promise<WorkspaceFile[]>;
+  /** The chosen `r2.file`, or `path` inside the chosen `r2.folder`, with the `etag` of its content, without reading it (cache keys). */
+  statFile(name: string, path?: string): Promise<WorkspaceFileStat>;
   /** Writes `path` inside the chosen `r2.folder`; the file shows "Created by run" on the Files page. */
   writeFile(name: string, path: string, body: FileBody, options?: { contentType?: string; size?: number }): Promise<WorkspaceFile & { replaced: boolean }>;
 };
+
+/**
+ * Text of a cache key made of `parts`: the same parts give the same text whatever the order of object keys. Put in it
+ * everything that changes the output (the input fields that matter, a file's `etag` from `statFile`, an outside URL as
+ * written) and leave out what does not. The runner keeps only its sha256, per workspace, node version and environment.
+ */
+export function cacheKey(...parts: unknown[]): string {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+          .map((key) => [key, stable((value as Record<string, unknown>)[key])]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(parts.map(stable));
+}
 
 /**
  * A failure to report to the runner as `{ error: { code, message, retryable } }`.

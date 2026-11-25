@@ -21,6 +21,14 @@ function broker(answers: Record<string, { status: number; body: unknown }>): { e
   return { env: { RESOURCE_BROKER: fetcher }, calls };
 }
 
+test("statFile asks the broker for a file's etag", async () => {
+  const file = { path: "a.png", workspace_path: "in/a.png", name: "a.png", size: 3, mime_type: "image/png", etag: "e1" };
+  const { env, calls } = broker({ "/v1/files/FOLDER/stat": { status: 200, body: { file } } });
+  const reader = createResourceReader({ env, token: TOKEN });
+  assert.deepEqual(await reader.statFile("FOLDER", "a.png"), file);
+  assert.deepEqual(calls, [`/v1/files/FOLDER/stat Bearer ${TOKEN}`]);
+});
+
 test("asks the broker with the run token and caches each answer for the call", async () => {
   const { env, calls } = broker({ "/v1/secrets/ECHO_SECRET": { status: 200, body: { value: "s3cr3t" } }, "/v1/variables/ECHO_VARIABLE": { status: 200, body: { value: "small" } } });
   const reader = createResourceReader({ env, token: TOKEN });
