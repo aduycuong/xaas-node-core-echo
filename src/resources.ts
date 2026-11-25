@@ -32,6 +32,9 @@ export type Resource = { kind: string; connection: Connection; item?: ResourceIt
 /** A workspace file as the broker describes it: `path` is inside the chosen folder (the name, for a chosen file). */
 export type WorkspaceFile = { path: string; workspace_path: string; name: string; size: number; mime_type: string };
 
+/** A workspace file with the `etag` of its content in storage: it changes whenever the content does (cache keys). */
+export type WorkspaceFileStat = WorkspaceFile & { etag: string };
+
 /** What `writeFile` accepts: a stream (pass `size` when known, else it is written in parts), bytes or text. */
 export type FileBody = ReadableStream<Uint8Array> | Uint8Array | ArrayBuffer | string;
 
@@ -51,6 +54,8 @@ export type ResourceReader = {
   readFile(name: string, path?: string): Promise<{ file: WorkspaceFile; body: ReadableStream<Uint8Array> }>;
   /** Files inside the folder chosen for an `r2.folder` resource (and its subfolders), newest first. */
   listFiles(name: string, options?: { prefix?: string }): Promise<WorkspaceFile[]>;
+  /** What a file is, with the `etag` of its content, without reading it: the chosen `r2.file`, or `path` in the chosen `r2.folder`. */
+  statFile(name: string, path?: string): Promise<WorkspaceFileStat>;
   /** Writes `path` inside the folder chosen for an `r2.folder` resource; a file of that name gets new content. */
   writeFile(name: string, path: string, body: FileBody, options?: { contentType?: string; size?: number }): Promise<WorkspaceFile & { replaced: boolean }>;
 };
@@ -119,6 +124,7 @@ export function createResourceReader(params: { env: ResourceEnv; token: string |
       return { file: JSON.parse(response.headers.get("X-XAAS-File") ?? "{}") as WorkspaceFile, body: response.body };
     },
     listFiles: async (name, options) => ((await (await call(`/v1/files/${encodeURIComponent(name)}/list${query({ prefix: options?.prefix })}`)).json()) as { files: WorkspaceFile[] }).files,
+    statFile: async (name, path) => ((await (await call(`/v1/files/${encodeURIComponent(name)}/stat${query({ path })}`)).json()) as { file: WorkspaceFileStat }).file,
     writeFile: async (name, path, body, options) => {
       const headers: Record<string, string> = { "Content-Type": options?.contentType ?? (typeof body === "string" ? "text/plain; charset=utf-8" : "application/octet-stream") };
       let payload: BodyInit;
