@@ -91,7 +91,7 @@ Runner có thể gọi lại cùng một node run: khi node trả lỗi retry đ
 
 ### Cache
 
-Workflow có thể cache output của node (ô **Cache** ở tab Settings, `data.settings.cacheTtl` tính bằng giây, 0 là không cache), nhưng chỉ khi node cho phép: `cache: true` trong manifest và `export async function cacheKey(input, ctx)` trong `node.ts`. Thiếu `cacheKey` thì `/health` báo lỗi, nên `nodes:deploy` dừng lại.
+Workflow có thể cache output của node (ô **Cache** ở tab Settings, `data.settings.cacheTtl`: số giây, `0` là không cache, `-1` là vĩnh viễn tới khi người dùng bấm **Clear cache**), nhưng chỉ khi node cho phép: `cache: true` trong manifest và `export async function cacheKey(input, ctx)` trong `node.ts`. Thiếu `cacheKey` thì `/health` báo lỗi, nên `nodes:deploy` dừng lại.
 
 - Ở attempt 1, trước khi chạy, runner gọi `POST /cache-key` (cùng envelope, cùng header và token như `POST /`). `cacheKey` trả một chuỗi, runner lưu sha256 của nó. Một run cùng workspace, cùng version node, cùng env, cùng key, còn trong TTL thì dùng lại output đã lưu và **không chạy node** (node run hiện "from cache"). Trả `null` là không cache input này. `cacheKey` lỗi thì runner ghi log rồi chạy node như thường.
 - Node tự quyết cái gì làm nên key: dùng `cacheKey(...parts)` của `protocol.ts` (JSON ổn định, không phụ thuộc thứ tự key). Đưa vào những gì đổi output, bỏ những gì không đổi output.
